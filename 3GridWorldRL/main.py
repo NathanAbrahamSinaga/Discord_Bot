@@ -80,7 +80,7 @@ class QLearningAgent:
             if self.epsilon < self.epsilon_min:
                 self.epsilon = self.epsilon_min
 
-def train_agent(env, episodes=1000, max_steps=100):
+def train_agent(env, episodes=2000, max_steps=200):
     agent = QLearningAgent(env.n_rows, env.n_cols)
     for ep in range(episodes):
         state = env.reset()
@@ -139,7 +139,7 @@ async def on_message(message):
 
         state = env.reset()
         step_count = 0
-        max_simulation_steps = 50
+        max_simulation_steps = 100
 
         simulation_message = await message.channel.send("Mulai simulasi...")
 
@@ -161,7 +161,7 @@ async def on_message(message):
         else:
             await message.channel.send("Maaf kami goblog")
 
-TOKEN = "MyDiscordToken"
+TOKEN = "yourdiscordtoken"
 
 if not TOKEN or TOKEN == "YOUR_BOT_TOKEN":
     print("Error: Discord Token tidak ada atau belum diatur.")
