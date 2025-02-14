@@ -80,7 +80,7 @@ class QLearningAgent:
             if self.epsilon < self.epsilon_min:
                 self.epsilon = self.epsilon_min
 
-def train_agent(env, episodes=2000, max_steps=200):
+def train_agent(env, episodes=30000, max_steps=400):
     agent = QLearningAgent(env.n_rows, env.n_cols)
     for ep in range(episodes):
         state = env.reset()
@@ -95,14 +95,22 @@ def train_agent(env, episodes=2000, max_steps=200):
     return agent
 
 def render_grid_with_agent(grid, agent_pos):
+    # Mapping karakter ke emoji
+    emoji_mapping = {
+        "S": "🔴",
+        "G": "🟢",
+        "1": "⬛",
+        "0": "⬜"
+    }
     rendered = []
     for i, row in enumerate(grid):
         row_str = ""
         for j, cell in enumerate(row):
+            # Jika posisi agent, tampilkan emoji agent
             if (i, j) == agent_pos:
-                row_str += "A "
+                row_str += "🟠 "  # Agent
             else:
-                row_str += cell + " "
+                row_str += emoji_mapping.get(cell, cell) + " "
         rendered.append(row_str)
     return "\n".join(rendered)
 
@@ -134,22 +142,28 @@ async def on_message(message):
 
         env = GridWorldEnv(grid)
         await message.channel.send("Melatih agen RL... SING SABAR!")
-        agent = train_agent(env, episodes=1000)
+        agent = train_agent(env, episodes=60000)
         await message.channel.send("Latihan selesai! Mulai simulasi...")
 
         state = env.reset()
         step_count = 0
         max_simulation_steps = 100
 
-        simulation_message = await message.channel.send("Mulai simulasi...")
+        simulation_embed = discord.Embed(
+            title="Simulasi Gridworld",
+            description="Mulai simulasi...",
+            color=0x3498db
+        )
+        simulation_message = await message.channel.send(embed=simulation_embed)
 
         while step_count < max_simulation_steps:
             grid_render = render_grid_with_agent(grid, state)
-            content = f"Langkah {step_count}:\n```\n{grid_render}\n```"
-            await simulation_message.edit(content=content)
+            simulation_embed.description = f"Langkah {step_count}:\n```\n{grid_render}\n```"
+            await simulation_message.edit(embed=simulation_embed)
 
             if state == env.goal:
-                await message.channel.send("Goal tercapai! 🎉")
+                simulation_embed.title = "Goal tercapai! 🎉"
+                await simulation_message.edit(embed=simulation_embed)
                 break
 
             action = np.argmax(agent.q_table[state[0], state[1]])
@@ -159,9 +173,11 @@ async def on_message(message):
 
             await asyncio.sleep(1)
         else:
-            await message.channel.send("Maaf kami goblog")
+            simulation_embed.title = "Simulasi Selesai"
+            simulation_embed.description = "Maaf kami goblog"
+            await simulation_message.edit(embed=simulation_embed)
 
-TOKEN = "yourdiscordtoken"
+TOKEN = "YOUR_BOT_TOKEN"
 
 if not TOKEN or TOKEN == "YOUR_BOT_TOKEN":
     print("Error: Discord Token tidak ada atau belum diatur.")
