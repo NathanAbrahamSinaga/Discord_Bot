@@ -18,15 +18,15 @@ i18n = I18nAuto(language="ja")
 
 models = {
     "Mita": {
-        "GPT_MODEL_PATH": "GPT_weights_v2/MitaMiside-e15.ckpt",
-        "SOVITS_MODEL_PATH": "SoVITS_weights_v2/MitaMiside_e8_s352.pth",
-        "REF_WAV_PATH": "../dataset2/audio8.wav",
+        "GPT_MODEL_PATH": "../Models/Mita/MitaMiside-e15.ckpt",
+        "SOVITS_MODEL_PATH": "../Models/Mita/MitaMiside_e8_s352.pth",
+        "REF_WAV_PATH": "../Models/Mita/audio8.wav",
         "PROMPT_TEXT": "でも、私のチビちゃんたちはどこかおかしいみたいで。"
     },
     "Emu": {
-        "GPT_MODEL_PATH": "GPT_weights_v2/EmuOtori-e15.ckpt",
-        "SOVITS_MODEL_PATH": "SoVITS_weights_v2/EmuOtori_e8_s352.pth",
-        "REF_WAV_PATH": "../EmuDataset/emu8.wav",
+        "GPT_MODEL_PATH": "../Models/Emu_Otori/EmuOtori-e15.ckpt",
+        "SOVITS_MODEL_PATH": "../Models/Emu_Otori/EmuOtori_e8_s352.pth",
+        "REF_WAV_PATH": "../Models/Emu_Otori/emu8.wav",
         "PROMPT_TEXT": "あの時は、ねねちゃんたちに手伝ってもらったし、また一緒にやろうよって誘っちゃおっかなー。"
     }
 }
