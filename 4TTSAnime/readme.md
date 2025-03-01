@@ -100,7 +100,5 @@ This project is a Discord bot that integrates text-to-speech (TTS) functionaliti
     ├── .env
     ├── GPT-SoVITS/
     │   └── TTSAnime.py
-    └── Models/https://drive.google.com/drive/folders/1HtUTs9jU9-YEkTzbxNLllDqc84a0NfR0?usp=sharing
-
-
+    └── Models/ (https://drive.google.com/drive/folders/1HtUTs9jU9-YEkTzbxNLllDqc84a0NfR0?usp=sharing)
 
