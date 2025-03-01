@@ -148,6 +148,7 @@ With your environment set up and configurations in place, you can start the bot 
 ## Usage
 
 - Switch Character
+    kkoasjdf
 - 
 - 
 - 
