@@ -65,7 +65,7 @@ This project is a Discord bot that integrates text-to-speech (TTS) functionaliti
     mkdir -p tools/damo_asr/models
     mkdir -p tools/uvr5
 
-### Download Required Models
+### 3. Download Required Models
 
 1. **Download GPT-SoVITS Model:**
 
@@ -100,5 +100,14 @@ This project is a Discord bot that integrates text-to-speech (TTS) functionaliti
     ├── .env
     ├── GPT-SoVITS/
     │   └── TTSAnime.py
-    └── Models/ (https://drive.google.com/drive/folders/1HtUTs9jU9-YEkTzbxNLllDqc84a0NfR0?usp=sharing)
+    └── Models/ [Download](https://drive.google.com/drive/folders/1HtUTs9jU9-YEkTzbxNLllDqc84a0NfR0?usp=sharing)
 
+### 4. Configure API Keys and Environment Variables
+
+1. **Create a .env file in your project root with the following content:**
+
+    ```bash
+    GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
+    DISCORD_BOT_TOKEN="YOUR_DISCORD_BOT_TOKEN"
+
+2. 
