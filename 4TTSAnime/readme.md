@@ -110,4 +110,8 @@ This project is a Discord bot that integrates text-to-speech (TTS) functionaliti
     GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
     DISCORD_BOT_TOKEN="YOUR_DISCORD_BOT_TOKEN"
 
-2. 
+2. **Google Gemini API Key:**
+
+    - Visit [Google AI Studio](https://aistudio.google.com/) and sign in
+    - Navigate to the API keys section in the left sidebar.
+    - Create a new API key and paste it into the .env file under GEMINI_API_KEY.
