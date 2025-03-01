@@ -113,5 +113,35 @@ This project is a Discord bot that integrates text-to-speech (TTS) functionaliti
 2. **Google Gemini API Key:**
 
     - Visit [Google AI Studio](https://aistudio.google.com/) and sign in
-    - Navigate to the API keys section in the left sidebar.
-    - Create a new API key and paste it into the .env file under GEMINI_API_KEY.
+    - Navigate to the API keys section in the left sidebar
+    - Create a new API key and paste it into the .env file under GEMINI_API_KEY
+
+### 5. Create Your Discord Bot
+
+1. **Go to the Discord Developer Portal:**
+    [Discord Developer Portal](https://discord.com/developers/applications)
+
+2. **Create a New Application**
+
+    - Click New Application and provide a name for your bot
+    - Under the Bot tab, click Add Bot
+    - Reset the token and copy it into your .env file under DISCORD_BOT_TOKEN
+
+3. **Configure Bot Permission:**
+
+    - Navigate to the OAuth2 Section, then URL Generator
+    - Select the following scopes: bot and applications.commands
+    - Under Bot Permissions, check:
+        - Read Message History
+        - Send Messages
+        - Send TTS Messages
+        - Use Slash Commands
+    - Copy the generated invite link and invite the bot to your Discord server
+
+## Running the Bot
+With your environment set up and configurations in place, you can start the bot by running:
+
+    ```bash
+    python TTSAnime.py
+
+## 
