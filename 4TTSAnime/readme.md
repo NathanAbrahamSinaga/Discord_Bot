@@ -147,8 +147,8 @@ With your environment set up and configurations in place, you can start the bot 
 
 ## Usage
 
-- Switch Character
-    kkoasjdf
+- **Switch Character**
+Use slash commands /mita or /otori_emu to switch between character voices
 - 
 - 
 - 
