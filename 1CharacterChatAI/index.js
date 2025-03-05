@@ -65,12 +65,10 @@ async function generateResponse(channelId, prompt, imageUrl = null) {
     throw error;
   }
 }
-
-// Fungsi splitText untuk membagi teks menjadi potongan maksimum 2000 karakter
 function splitText(text, maxLength = 2000) {
   const chunks = [];
   let currentChunk = '';
-  const sentences = text.split(/(?<=[.!\?])\s+/); // Membagi berdasarkan kalimat
+  const sentences = text.split(/(?<=[.!\?])\s+/);
 
   for (const sentence of sentences) {
     if (currentChunk.length + sentence.length + 1 > maxLength) {
@@ -78,7 +76,6 @@ function splitText(text, maxLength = 2000) {
         chunks.push(currentChunk);
         currentChunk = sentence;
       } else {
-        // Jika satu kalimat lebih panjang dari maxLength, bagi berdasarkan kata
         const words = sentence.split(' ');
         for (const word of words) {
           if (currentChunk.length + word.length + 1 > maxLength) {
@@ -98,7 +95,6 @@ function splitText(text, maxLength = 2000) {
     chunks.push(currentChunk);
   }
 
-  // Log untuk debugging
   console.log(`Total chunks: ${chunks.length}`);
   chunks.forEach((chunk, index) => {
     console.log(`Chunk ${index + 1} length: ${chunk.length}`);
@@ -154,17 +150,14 @@ client.on('messageCreate', async message => {
     const imageUrl = message.attachments.first()?.url;
 
     try {
-      // Mulai indikator "bot sedang mengetik"
       await message.channel.sendTyping();
 
       const response = await generateResponse(channelId, prompt, imageUrl);
       console.log(`Response length: ${response.length}`);
-      const responseChunks = splitText(response, 2000); // Bagi teks menjadi potongan maksimum 2000 karakter
+      const responseChunks = splitText(response, 2000);
 
-      // Kirim setiap potongan dengan delay di antara pesan kedua dan seterusnya
       for (let i = 0; i < responseChunks.length; i++) {
         if (i > 0) {
-          // Tambahkan delay 1 detik sebelum mengirim pesan kedua dan seterusnya
           await new Promise(resolve => setTimeout(resolve, 1000));
         }
         await message.channel.send(responseChunks[i]);
