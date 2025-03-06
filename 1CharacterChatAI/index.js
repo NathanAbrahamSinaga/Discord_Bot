@@ -7,7 +7,7 @@ const fetch = require('node-fetch');
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 let model;
-const systemPrompt = "Anda adalah asisten yang membantu dan ramah. Saat memberikan contoh kode, selalu gunakan format Markdown yang tepat dengan tiga tanda backtick (```) dan tentukan bahasa pemrograman (misalnya, ```javascript). Pastikan setiap blok kode ditutup dengan tiga tanda backtick (```) untuk menjaga format yang rapi, meskipun responsnya panjang.";
+const systemPrompt = "Anda adalah asisten yang membantu dan ramah. Berikan respons dalam teks polos yang sesuai untuk Discord, hindari pemformatan Markdown yang berlebihan (misalnya, tidak perlu header atau daftar kecuali diminta secara eksplisit). Saat memberikan contoh kode, gunakan blok kode Markdown yang tepat dengan tiga tanda backtick (```) dan tentukan bahasa pemrograman (misalnya, ```javascript). Pastikan setiap blok kode ditutup dengan tiga tanda backtick (```) untuk pemformatan yang rapi.";
 
 function updateModel() {
   model = genAI.getGenerativeModel({
@@ -25,6 +25,17 @@ const commandCooldowns = new Map();
 const channelActivity = new Map();
 const MAX_HISTORY = 10;
 const COOLDOWN_TIME = 30000;
+
+const SUPPORTED_MIME_TYPES = {
+  'image/jpeg': 'image',
+  'image/png': 'image',
+  'application/pdf': 'pdf',
+  'video/mp4': 'video',
+  'video/mpeg': 'video',
+  'audio/mp3': 'audio',
+  'audio/mpeg': 'audio',
+  'audio/wav': 'audio'
+};
 
 async function generateResponse(channelId, prompt, mediaData = null) {
   try {
@@ -55,14 +66,14 @@ async function generateResponse(channelId, prompt, mediaData = null) {
       result = await chat.sendMessage(prompt);
     }
 
-    const response = await result.response;
+    const responseText = await result.response;
     
     const history = await chat.getHistory();
     if (history.length > MAX_HISTORY * 2) {
       history.splice(0, history.length - MAX_HISTORY * 2);
     }
     
-    return response.text();
+    return responseText.text();
   } catch (error) {
     console.error('Error in generateResponse:', error);
     throw error;
@@ -77,13 +88,13 @@ function splitText(text, maxLength = 2000) {
   for (const sentence of sentences) {
     if (currentChunk.length + sentence.length + 1 > maxLength) {
       if (currentChunk) {
-        chunks.push(currentChunk);
+        chunks.push(currentChunk.trim());
         currentChunk = sentence;
       } else {
         const words = sentence.split(' ');
         for (const word of words) {
           if (currentChunk.length + word.length + 1 > maxLength) {
-            chunks.push(currentChunk);
+            chunks.push(currentChunk.trim());
             currentChunk = word;
           } else {
             currentChunk += (currentChunk ? ' ' : '') + word;
@@ -96,7 +107,7 @@ function splitText(text, maxLength = 2000) {
   }
 
   if (currentChunk) {
-    chunks.push(currentChunk);
+    chunks.push(currentChunk.trim());
   }
 
   console.log(`Total chunks: ${chunks.length}`);
@@ -116,7 +127,7 @@ const client = new Client({
 });
 
 client.once('ready', () => {
-  console.log(`Bot ${client.user.tag} is ready!`);
+  console.log(`Bot ${client.user.tag} siap!`);
 });
 
 client.on('interactionCreate', async interaction => {
@@ -129,17 +140,20 @@ client.on('interactionCreate', async interaction => {
 
   if (now < cooldownEndTime) {
     const remainingTime = (cooldownEndTime - now) / 1000;
-    return interaction.reply({ content: `Please wait ${remainingTime.toFixed(1)} seconds before using this command again.`, ephemeral: true });
+    return interaction.reply({ 
+      content: `Silakan tunggu ${remainingTime.toFixed(1)} detik sebelum menggunakan perintah ini lagi.`, 
+      ephemeral: true 
+    });
   }
 
   commandCooldowns.set(cooldownKey, now + COOLDOWN_TIME);
 
   if (commandName === 'activate') {
     channelActivity.set(channelId, true);
-    await interaction.reply('Bot activated in this channel!');
+    await interaction.reply('Bot diaktifkan di channel ini!');
   } else if (commandName === 'deactivate') {
     channelActivity.set(channelId, false);
-    await interaction.reply('Bot deactivated in this channel!');
+    await interaction.reply('Bot dinonaktifkan di channel ini!');
   }
 });
 
@@ -154,41 +168,64 @@ client.on('messageCreate', async message => {
     const attachment = message.attachments.first();
     let mediaData = null;
 
-    if (attachment && attachment.contentType === 'application/pdf') {
-      try {
-        const response = await fetch(attachment.url);
-        const buffer = await response.buffer();
-        const base64 = buffer.toString('base64');
-        mediaData = {
-          mimeType: attachment.contentType,
-          base64: base64
-        };
-      } catch (error) {
-        console.error('Error fetching attachment:', error);
-        await message.reply('There was an error processing the attached document.');
+    if (attachment) {
+      const mimeType = attachment.contentType;
+      if (!SUPPORTED_MIME_TYPES[mimeType]) {
+        await message.reply('Format file tidak didukung. Format yang didukung: JPEG, PNG, PDF, MP4, MP3, WAV');
         return;
       }
-    } else if (attachment) {
-      await message.reply('Unsupported file format. Please attach a PDF document.');
-      return;
-    }
 
-    try {
-      await message.channel.sendTyping();
+      try {
+        const fetchResponse = await fetch(attachment.url);
+        const buffer = await fetchResponse.buffer();
+        const base64 = buffer.toString('base64');
+        mediaData = {
+          mimeType: mimeType,
+          base64: base64
+        };
 
-      const response = await generateResponse(channelId, prompt, mediaData);
-      console.log(`Response length: ${response.length}`);
-      const responseChunks = splitText(response, 2000);
-
-      for (let i = 0; i < responseChunks.length; i++) {
-        if (i > 0) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
+        const fileType = SUPPORTED_MIME_TYPES[mimeType];
+        let enhancedPrompt = prompt;
+        if (fileType === 'image' && !prompt) {
+          enhancedPrompt = 'Jelaskan gambar ini secara detail.';
+        } else if (fileType === 'video' && !prompt) {
+          enhancedPrompt = 'Berikan ringkasan detail dari video ini.';
+        } else if (fileType === 'audio' && !prompt) {
+          enhancedPrompt = 'Transkripsi dan ringkasan audio ini.';
+        } else if (fileType === 'pdf' && !prompt) {
+          enhancedPrompt = 'Ringkasan isi dokumen PDF ini.';
         }
-        await message.channel.send(responseChunks[i]);
+
+        await message.channel.sendTyping();
+        const aiResponse = await generateResponse(channelId, enhancedPrompt, mediaData);
+        const responseChunks = splitText(aiResponse, 2000);
+
+        for (let i = 0; i < responseChunks.length; i++) {
+          if (i > 0) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
+          await message.channel.send(responseChunks[i]);
+        }
+      } catch (error) {
+        console.error('Error memproses lampiran:', error);
+        await message.reply('Terjadi kesalahan saat memproses file lampiran.');
       }
-    } catch (error) {
-      console.error('Error in messageCreate:', error);
-      await message.reply('Terjadi kesalahan, silahkan coba lagi nanti.');
+    } else {
+      try {
+        await message.channel.sendTyping();
+        const aiResponse = await generateResponse(channelId, prompt);
+        const responseChunks = splitText(aiResponse, 2000);
+
+        for (let i = 0; i < responseChunks.length; i++) {
+          if (i > 0) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
+          await message.channel.send(responseChunks[i]);
+        }
+      } catch (error) {
+        console.error('Error in messageCreate:', error);
+        await message.reply('Terjadi kesalahan, silakan coba lagi nanti.');
+      }
     }
   }
 });
