@@ -1,6 +1,9 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits } = require('discord.js');
+const { Client, GatewayIntentBits, AttachmentBuilder } = require('discord.js');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const fs = require('fs');
+const path = require('path');
+const fetch = require('node-fetch');
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 let model;
@@ -22,12 +25,6 @@ const commandCooldowns = new Map();
 const channelActivity = new Map();
 const MAX_HISTORY = 10;
 const COOLDOWN_TIME = 30000;
-
-// Fungsi untuk dynamic import node-fetch
-const fetch = async (...args) => {
-  const { default: fetch } = await import('node-fetch');
-  return fetch(...args);
-};
 
 async function generateResponse(channelId, prompt, mediaData = null) {
   try {
@@ -157,14 +154,23 @@ client.on('messageCreate', async message => {
     const attachment = message.attachments.first();
     let mediaData = null;
 
-    if (attachment) {
-      const response = await (await fetch)(attachment.url);
-      const buffer = await response.buffer();
-      const base64 = buffer.toString('base64');
-      mediaData = {
-        mimeType: attachment.contentType,
-        base64: base64
-      };
+    if (attachment && attachment.contentType === 'application/pdf') {
+      try {
+        const response = await fetch(attachment.url);
+        const buffer = await response.buffer();
+        const base64 = buffer.toString('base64');
+        mediaData = {
+          mimeType: attachment.contentType,
+          base64: base64
+        };
+      } catch (error) {
+        console.error('Error fetching attachment:', error);
+        await message.reply('There was an error processing the attached document.');
+        return;
+      }
+    } else if (attachment) {
+      await message.reply('Unsupported file format. Please attach a PDF document.');
+      return;
     }
 
     try {
@@ -182,7 +188,7 @@ client.on('messageCreate', async message => {
       }
     } catch (error) {
       console.error('Error in messageCreate:', error);
-      await message.reply('Terjadi kesalahan, silakan coba lagi nanti.');
+      await message.reply('Terjadi kesalahan, silahkan coba lagi nanti.');
     }
   }
 });
