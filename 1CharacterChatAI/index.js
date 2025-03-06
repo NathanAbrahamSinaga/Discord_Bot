@@ -4,11 +4,11 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 let model;
-let systemPrompt = "Anda adalah asisten yang membantu dan ramah. Saat memberikan contoh kode, selalu gunakan format Markdown yang tepat dengan tiga tanda backtick (```) dan tentukan bahasa pemrograman (misalnya, ```javascript). Pastikan setiap blok kode ditutup dengan tiga tanda backtick (```) untuk menjaga format yang rapi, meskipun responsnya panjang.";
+const systemPrompt = "Anda adalah asisten yang membantu dan ramah. Saat memberikan contoh kode, selalu gunakan format Markdown yang tepat dengan tiga tanda backtick (```) dan tentukan bahasa pemrograman (misalnya, ```javascript). Pastikan setiap blok kode ditutup dengan tiga tanda backtick (```) untuk menjaga format yang rapi, meskipun responsnya panjang.";
 
 function updateModel() {
   model = genAI.getGenerativeModel({
-    model: 'gemini-1.5-pro',
+    model: 'gemini-2.0-flash',
     systemInstruction: {
       role: 'model',
       parts: [{ text: systemPrompt }]
@@ -23,7 +23,13 @@ const channelActivity = new Map();
 const MAX_HISTORY = 10;
 const COOLDOWN_TIME = 30000;
 
-async function generateResponse(channelId, prompt, imageUrl = null) {
+// Fungsi untuk dynamic import node-fetch
+const fetch = async (...args) => {
+  const { default: fetch } = await import('node-fetch');
+  return fetch(...args);
+};
+
+async function generateResponse(channelId, prompt, mediaData = null) {
   try {
     if (!conversationHistory.has(channelId)) {
       conversationHistory.set(channelId, model.startChat({
@@ -38,16 +44,16 @@ async function generateResponse(channelId, prompt, imageUrl = null) {
     const chat = conversationHistory.get(channelId);
     let result;
 
-    if (imageUrl) {
-      const imageParts = [
+    if (mediaData) {
+      const mediaParts = [
         {
           inlineData: {
-            mimeType: 'image/png',
-            data: Buffer.from(await fetch(imageUrl).then(res => res.arrayBuffer())).toString('base64')
+            mimeType: mediaData.mimeType,
+            data: mediaData.base64
           }
         }
       ];
-      result = await chat.sendMessage([prompt, ...imageParts]);
+      result = await chat.sendMessage([prompt, ...mediaParts]);
     } else {
       result = await chat.sendMessage(prompt);
     }
@@ -65,6 +71,7 @@ async function generateResponse(channelId, prompt, imageUrl = null) {
     throw error;
   }
 }
+
 function splitText(text, maxLength = 2000) {
   const chunks = [];
   let currentChunk = '';
@@ -147,12 +154,23 @@ client.on('messageCreate', async message => {
 
   if (isBotActive || message.content.startsWith('!chat')) {
     const prompt = message.content.replace('!chat', '').trim();
-    const imageUrl = message.attachments.first()?.url;
+    const attachment = message.attachments.first();
+    let mediaData = null;
+
+    if (attachment) {
+      const response = await (await fetch)(attachment.url);
+      const buffer = await response.buffer();
+      const base64 = buffer.toString('base64');
+      mediaData = {
+        mimeType: attachment.contentType,
+        base64: base64
+      };
+    }
 
     try {
       await message.channel.sendTyping();
 
-      const response = await generateResponse(channelId, prompt, imageUrl);
+      const response = await generateResponse(channelId, prompt, mediaData);
       console.log(`Response length: ${response.length}`);
       const responseChunks = splitText(response, 2000);
 
