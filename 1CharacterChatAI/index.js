@@ -1,17 +1,16 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, AttachmentBuilder } = require('discord.js');
+const { Client, GatewayIntentBits } = require('discord.js');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const fs = require('fs');
-const path = require('path');
 const fetch = require('node-fetch');
 
+// Inisialisasi Gemini API dengan API Key dari file .env
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 let model;
-const systemPrompt = "Jawab dengan bahasa indonesia";
+const systemPrompt = "Jawab dengan bahasa Indonesia dan gunakan format Markdown untuk daftar, dengan setiap item daftar dimulai pada baris baru dengan tanda '-' atau '*'.";
 
 function updateModel() {
   model = genAI.getGenerativeModel({
-    model: 'gemini-2.0-flash',
+    model: 'gemini-1.5-flash',
     systemInstruction: {
       role: 'model',
       parts: [{ text: systemPrompt }]
@@ -43,22 +42,27 @@ async function googleSearch(query) {
   try {
     const url = `https://www.googleapis.com/customsearch/v1?key=${GOOGLE_API_KEY}&cx=${GOOGLE_CSE_ID}&q=${encodeURIComponent(query)}&num=3`;
     const response = await fetch(url);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return `Maaf, terjadi kesalahan saat mengakses API Google. Status: ${response.status}, Pesan: ${errorText}`;
+    }
+
     const data = await response.json();
-    
     if (!data.items || data.items.length === 0) {
       return "Maaf, tidak ada hasil yang ditemukan untuk pencarian ini.";
     }
 
     let searchResults = "Berikut adalah hasil pencarian dari Google:\n\n";
     data.items.forEach((item, index) => {
-      searchResults += `${index + 1}. ${item.title}\n`;
+      searchResults += `${index + 1}. **${item.title}**\n`;
       searchResults += `${item.snippet}\n`;
       searchResults += `Sumber: ${item.link}\n\n`;
     });
-    
+
     return searchResults;
   } catch (error) {
-    console.error('Error in googleSearch:', error);
+    console.error('Error di googleSearch:', error);
     return "Terjadi kesalahan saat melakukan pencarian Google.";
   }
 }
@@ -85,29 +89,27 @@ async function generateResponse(channelId, prompt, mediaData = null, searchQuery
     }
 
     if (mediaData) {
-      const mediaParts = [
-        {
-          inlineData: {
-            mimeType: mediaData.mimeType,
-            data: mediaData.base64
-          }
+      const mediaParts = [{
+        inlineData: {
+          mimeType: mediaData.mimeType,
+          data: mediaData.base64
         }
-      ];
+      }];
       result = await chat.sendMessage([finalPrompt, ...mediaParts]);
     } else {
       result = await chat.sendMessage(finalPrompt);
     }
 
-    const responseText = await result.response;
-    
+    const responseText = await result.response.text();
+
     const history = await chat.getHistory();
     if (history.length > MAX_HISTORY * 2) {
       history.splice(0, history.length - MAX_HISTORY * 2);
     }
-    
-    return responseText.text();
+
+    return responseText;
   } catch (error) {
-    console.error('Error in generateResponse:', error);
+    console.error('Error di generateResponse:', error);
     throw error;
   }
 }
@@ -142,11 +144,6 @@ function splitText(text, maxLength = 2000) {
     chunks.push(currentChunk.trim());
   }
 
-  console.log(`Total chunks: ${chunks.length}`);
-  chunks.forEach((chunk, index) => {
-    console.log(`Chunk ${index + 1} length: ${chunk.length}`);
-  });
-
   return chunks;
 }
 
@@ -172,9 +169,9 @@ client.on('interactionCreate', async interaction => {
 
   if (now < cooldownEndTime) {
     const remainingTime = (cooldownEndTime - now) / 1000;
-    return interaction.reply({ 
-      content: `Silakan tunggu ${remainingTime.toFixed(1)} detik sebelum menggunakan perintah ini lagi.`, 
-      ephemeral: true 
+    return interaction.reply({
+      content: `Silakan tunggu ${remainingTime.toFixed(1)} detik sebelum menggunakan perintah ini lagi.`,
+      ephemeral: true
     });
   }
 
@@ -196,6 +193,24 @@ client.on('messageCreate', async message => {
   const isBotActive = channelActivity.get(channelId) || false;
   const content = message.content.trim();
 
+  if (content.toLowerCase().startsWith('!gift')) {
+    await message.channel.sendTyping();
+    const giftPrompt = "Pengguna mengirimkan gift. Berikan respons yang kreatif dan berterima kasih dalam bahasa Indonesia.";
+    try {
+      const aiResponse = await generateResponse(channelId, giftPrompt);
+      const responseChunks = splitText(aiResponse);
+      for (let i = 0; i < responseChunks.length; i++) {
+        if (i > 0) await new Promise(resolve => setTimeout(resolve, 1000));
+        await message.channel.send(responseChunks[i]);
+      }
+    } catch (error) {
+      console.error('Error saat merespons gift:', error);
+      await message.reply('Terjadi kesalahan saat merespons gift. Silakan coba lagi nanti.');
+    }
+    return;
+  }
+
+  // Logika untuk perintah lain seperti !chat atau !cari
   if (isBotActive || content.startsWith('!chat') || content.startsWith('!cari')) {
     let prompt = content;
     let searchQuery = null;
@@ -203,7 +218,7 @@ client.on('messageCreate', async message => {
     if (content.startsWith('!cari')) {
       searchQuery = content.replace('!cari', '').trim();
       prompt = `Berikan jawaban berdasarkan pencarian untuk: ${searchQuery}`;
-    } else {
+    } else if (content.startsWith('!chat')) {
       prompt = content.replace('!chat', '').trim();
     }
 
@@ -219,8 +234,8 @@ client.on('messageCreate', async message => {
 
       try {
         const fetchResponse = await fetch(attachment.url);
-        const buffer = await fetchResponse.buffer();
-        const base64 = buffer.toString('base64');
+        const buffer = await fetchResponse.arrayBuffer();
+        const base64 = Buffer.from(buffer).toString('base64');
         mediaData = {
           mimeType: mimeType,
           base64: base64
@@ -228,24 +243,17 @@ client.on('messageCreate', async message => {
 
         const fileType = SUPPORTED_MIME_TYPES[mimeType];
         let enhancedPrompt = prompt;
-        if (fileType === 'image' && !prompt) {
-          enhancedPrompt = systemPrompt;
-        } else if (fileType === 'video' && !prompt) {
-          enhancedPrompt = systemPrompt;
-        } else if (fileType === 'audio' && !prompt) {
-          enhancedPrompt = systemPrompt;
-        } else if (fileType === 'pdf' && !prompt) {
-          enhancedPrompt = systemPrompt;
-        }
+        if (fileType === 'image' && !prompt) enhancedPrompt = systemPrompt;
+        else if (fileType === 'video' && !prompt) enhancedPrompt = systemPrompt;
+        else if (fileType === 'audio' && !prompt) enhancedPrompt = systemPrompt;
+        else if (fileType === 'pdf' && !prompt) enhancedPrompt = systemPrompt;
 
         await message.channel.sendTyping();
         const aiResponse = await generateResponse(channelId, enhancedPrompt, mediaData, searchQuery);
-        const responseChunks = splitText(aiResponse, 2000);
+        const responseChunks = splitText(aiResponse);
 
         for (let i = 0; i < responseChunks.length; i++) {
-          if (i > 0) {
-            await new Promise(resolve => setTimeout(resolve, 1000));
-          }
+          if (i > 0) await new Promise(resolve => setTimeout(resolve, 1000));
           await message.channel.send(responseChunks[i]);
         }
       } catch (error) {
@@ -256,16 +264,14 @@ client.on('messageCreate', async message => {
       try {
         await message.channel.sendTyping();
         const aiResponse = await generateResponse(channelId, prompt, null, searchQuery);
-        const responseChunks = splitText(aiResponse, 2000);
+        const responseChunks = splitText(aiResponse);
 
         for (let i = 0; i < responseChunks.length; i++) {
-          if (i > 0) {
-            await new Promise(resolve => setTimeout(resolve, 1000));
-          }
+          if (i > 0) await new Promise(resolve => setTimeout(resolve, 1000));
           await message.channel.send(responseChunks[i]);
         }
       } catch (error) {
-        console.error('Error in messageCreate:', error);
+        console.error('Error di messageCreate:', error);
         await message.reply('Terjadi kesalahan, silakan coba lagi nanti.');
       }
     }
