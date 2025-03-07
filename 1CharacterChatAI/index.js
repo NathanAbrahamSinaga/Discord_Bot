@@ -7,7 +7,7 @@ const fetch = require('node-fetch');
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 let model;
-const systemPrompt = "Anda adalah asisten yang membantu dan ramah. Berikan respons dalam teks polos yang sesuai untuk Discord, hindari pemformatan Markdown yang berlebihan (misalnya, tidak perlu header atau daftar kecuali diminta secara eksplisit). Saat memberikan contoh kode, gunakan blok kode Markdown yang tepat dengan tiga tanda backtick (```) dan tentukan bahasa pemrograman (misalnya, ```javascript). Pastikan setiap blok kode ditutup dengan tiga tanda backtick (```) untuk pemformatan yang rapi.";
+const systemPrompt = "Jawab dengan bahasa indonesia";
 
 function updateModel() {
   model = genAI.getGenerativeModel({
@@ -25,6 +25,8 @@ const commandCooldowns = new Map();
 const channelActivity = new Map();
 const MAX_HISTORY = 10;
 const COOLDOWN_TIME = 30000;
+const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
+const GOOGLE_CSE_ID = process.env.GOOGLE_CSE_ID;
 
 const SUPPORTED_MIME_TYPES = {
   'image/jpeg': 'image',
@@ -37,7 +39,31 @@ const SUPPORTED_MIME_TYPES = {
   'audio/wav': 'audio'
 };
 
-async function generateResponse(channelId, prompt, mediaData = null) {
+async function googleSearch(query) {
+  try {
+    const url = `https://www.googleapis.com/customsearch/v1?key=${GOOGLE_API_KEY}&cx=${GOOGLE_CSE_ID}&q=${encodeURIComponent(query)}&num=3`;
+    const response = await fetch(url);
+    const data = await response.json();
+    
+    if (!data.items || data.items.length === 0) {
+      return "Maaf, tidak ada hasil yang ditemukan untuk pencarian ini.";
+    }
+
+    let searchResults = "Berikut adalah hasil pencarian dari Google:\n\n";
+    data.items.forEach((item, index) => {
+      searchResults += `${index + 1}. ${item.title}\n`;
+      searchResults += `${item.snippet}\n`;
+      searchResults += `Sumber: ${item.link}\n\n`;
+    });
+    
+    return searchResults;
+  } catch (error) {
+    console.error('Error in googleSearch:', error);
+    return "Terjadi kesalahan saat melakukan pencarian Google.";
+  }
+}
+
+async function generateResponse(channelId, prompt, mediaData = null, searchQuery = null) {
   try {
     if (!conversationHistory.has(channelId)) {
       conversationHistory.set(channelId, model.startChat({
@@ -51,6 +77,12 @@ async function generateResponse(channelId, prompt, mediaData = null) {
 
     const chat = conversationHistory.get(channelId);
     let result;
+    let finalPrompt = prompt;
+
+    if (searchQuery) {
+      const searchResults = await googleSearch(searchQuery);
+      finalPrompt = `${prompt}\n\nBerikut adalah informasi dari pencarian Google yang mungkin membantu:\n${searchResults}`;
+    }
 
     if (mediaData) {
       const mediaParts = [
@@ -61,9 +93,9 @@ async function generateResponse(channelId, prompt, mediaData = null) {
           }
         }
       ];
-      result = await chat.sendMessage([prompt, ...mediaParts]);
+      result = await chat.sendMessage([finalPrompt, ...mediaParts]);
     } else {
-      result = await chat.sendMessage(prompt);
+      result = await chat.sendMessage(finalPrompt);
     }
 
     const responseText = await result.response;
@@ -162,9 +194,19 @@ client.on('messageCreate', async message => {
 
   const channelId = message.channel.id;
   const isBotActive = channelActivity.get(channelId) || false;
+  const content = message.content.trim();
 
-  if (isBotActive || message.content.startsWith('!chat')) {
-    const prompt = message.content.replace('!chat', '').trim();
+  if (isBotActive || content.startsWith('!chat') || content.startsWith('!cari')) {
+    let prompt = content;
+    let searchQuery = null;
+
+    if (content.startsWith('!cari')) {
+      searchQuery = content.replace('!cari', '').trim();
+      prompt = `Berikan jawaban berdasarkan pencarian untuk: ${searchQuery}`;
+    } else {
+      prompt = content.replace('!chat', '').trim();
+    }
+
     const attachment = message.attachments.first();
     let mediaData = null;
 
@@ -187,17 +229,17 @@ client.on('messageCreate', async message => {
         const fileType = SUPPORTED_MIME_TYPES[mimeType];
         let enhancedPrompt = prompt;
         if (fileType === 'image' && !prompt) {
-          enhancedPrompt = 'Jelaskan gambar ini secara detail.';
+          enhancedPrompt = systemPrompt;
         } else if (fileType === 'video' && !prompt) {
-          enhancedPrompt = 'Berikan ringkasan detail dari video ini.';
+          enhancedPrompt = systemPrompt;
         } else if (fileType === 'audio' && !prompt) {
-          enhancedPrompt = 'Transkripsi dan ringkasan audio ini.';
+          enhancedPrompt = systemPrompt;
         } else if (fileType === 'pdf' && !prompt) {
-          enhancedPrompt = 'Ringkasan isi dokumen PDF ini.';
+          enhancedPrompt = systemPrompt;
         }
 
         await message.channel.sendTyping();
-        const aiResponse = await generateResponse(channelId, enhancedPrompt, mediaData);
+        const aiResponse = await generateResponse(channelId, enhancedPrompt, mediaData, searchQuery);
         const responseChunks = splitText(aiResponse, 2000);
 
         for (let i = 0; i < responseChunks.length; i++) {
@@ -213,7 +255,7 @@ client.on('messageCreate', async message => {
     } else {
       try {
         await message.channel.sendTyping();
-        const aiResponse = await generateResponse(channelId, prompt);
+        const aiResponse = await generateResponse(channelId, prompt, null, searchQuery);
         const responseChunks = splitText(aiResponse, 2000);
 
         for (let i = 0; i < responseChunks.length; i++) {
