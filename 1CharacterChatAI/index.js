@@ -3,10 +3,10 @@ const { Client, GatewayIntentBits } = require('discord.js');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const fetch = require('node-fetch');
 
-// Inisialisasi Gemini API dengan API Key dari file .env
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 let model;
-const systemPrompt = "Jawab dengan bahasa Indonesia dan gunakan format Markdown untuk daftar, dengan setiap item daftar dimulai pada baris baru dengan tanda '-' atau '*'.";
+
+const systemPrompt = "Jawab dengan bahasa Indonesia dan gunakan format Markdown. Untuk setiap daftar, pastikan setiap item dimulai pada baris baru dengan tanda '-'. Jangan gabungkan beberapa item dalam satu baris. Contoh format yang benar:\n- Item pertama\n- Item kedua\n- Item ketiga\nJika ada subjudul atau poin utama, gunakan '**Judul**' diikuti daftar dengan '-'. Pastikan output rapi dan mudah dibaca di Discord.";
 
 function updateModel() {
   model = genAI.getGenerativeModel({
@@ -30,6 +30,7 @@ const GOOGLE_CSE_ID = process.env.GOOGLE_CSE_ID;
 const SUPPORTED_MIME_TYPES = {
   'image/jpeg': 'image',
   'image/png': 'image',
+  'image/gif': 'gif',
   'application/pdf': 'pdf',
   'video/mp4': 'video',
   'video/mpeg': 'video',
@@ -55,9 +56,9 @@ async function googleSearch(query) {
 
     let searchResults = "Berikut adalah hasil pencarian dari Google:\n\n";
     data.items.forEach((item, index) => {
-      searchResults += `${index + 1}. **${item.title}**\n`;
-      searchResults += `${item.snippet}\n`;
-      searchResults += `Sumber: ${item.link}\n\n`;
+      searchResults += `- **${index + 1}. ${item.title}**\n`;
+      searchResults += `- ${item.snippet}\n`;
+      searchResults += `- Sumber: ${item.link}\n\n`;
     });
 
     return searchResults;
@@ -74,7 +75,7 @@ async function generateResponse(channelId, prompt, mediaData = null, searchQuery
         history: [],
         generationConfig: {
           temperature: 0.9,
-          maxOutputTokens: 2000,
+          maxOutputTokens: 4000,
         }
       }));
     }
@@ -114,18 +115,60 @@ async function generateResponse(channelId, prompt, mediaData = null, searchQuery
   }
 }
 
+function ensureListFormatting(text) {
+  const lines = text.split('\n');
+  const processedLines = [];
+  let inList = false;
+  let lastSubheader = '';
+
+  for (let line of lines) {
+    line = line.trim();
+    if (line.startsWith('**') && line.endsWith('**')) {
+      if (processedLines.length > 0) processedLines.push('');
+      processedLines.push(line);
+      lastSubheader = line;
+      inList = false;
+    } else if (line.startsWith('- ') || line.startsWith('* ')) {
+      processedLines.push(line.startsWith('- ') ? line : `- ${line.slice(2)}`);
+      inList = true;
+    } else if (line && inList) {
+      processedLines.push(`- ${line}`);
+    } else if (line.includes(' - ') || line.includes(' * ')) {
+      const separator = line.includes(' - ') ? ' - ' : ' * ';
+      const items = line.split(separator).map(item => item.trim()).filter(item => item);
+      items.forEach((item, index) => {
+        processedLines.push(`${index === 0 && !item.startsWith('-') ? '' : '-' } ${item}`);
+      });
+      inList = true;
+    } else if (line && !inList && lastSubheader) {
+      processedLines.push(`- ${line}`);
+      inList = true;
+    } else {
+      processedLines.push(line);
+      inList = false;
+    }
+  }
+
+  return processedLines.join('\n');
+}
+
 function splitText(text, maxLength = 2000) {
   const chunks = [];
   let currentChunk = '';
-  const sentences = text.split(/(?<=[.!\?])\s+/);
+  const lines = text.split('\n');
+  let lastSubheader = '';
 
-  for (const sentence of sentences) {
-    if (currentChunk.length + sentence.length + 1 > maxLength) {
+  for (const line of lines) {
+    if (line.startsWith('**') && line.endsWith('**')) {
+      lastSubheader = line;
+    }
+
+    if (currentChunk.length + line.length + 1 > maxLength) {
       if (currentChunk) {
         chunks.push(currentChunk.trim());
-        currentChunk = sentence;
+        currentChunk = lastSubheader ? `${lastSubheader}\n\n${line}` : line;
       } else {
-        const words = sentence.split(' ');
+        const words = line.split(' ');
         for (const word of words) {
           if (currentChunk.length + word.length + 1 > maxLength) {
             chunks.push(currentChunk.trim());
@@ -136,7 +179,7 @@ function splitText(text, maxLength = 2000) {
         }
       }
     } else {
-      currentChunk += (currentChunk ? ' ' : '') + sentence;
+      currentChunk += (currentChunk ? '\n' : '') + line;
     }
   }
 
@@ -144,7 +187,7 @@ function splitText(text, maxLength = 2000) {
     chunks.push(currentChunk.trim());
   }
 
-  return chunks;
+  return chunks.map(chunk => ensureListFormatting(chunk));
 }
 
 const client = new Client({
@@ -195,7 +238,7 @@ client.on('messageCreate', async message => {
 
   if (content.toLowerCase().startsWith('!gift')) {
     await message.channel.sendTyping();
-    const giftPrompt = "Pengguna mengirimkan gift. Berikan respons yang kreatif dan berterima kasih dalam bahasa Indonesia.";
+    const giftPrompt = "Berikan daftar saran hadiah menarik dalam bahasa Indonesia menggunakan format Markdown.";
     try {
       const aiResponse = await generateResponse(channelId, giftPrompt);
       const responseChunks = splitText(aiResponse);
@@ -205,7 +248,7 @@ client.on('messageCreate', async message => {
       }
     } catch (error) {
       console.error('Error saat merespons gift:', error);
-      await message.reply('Terjadi kesalahan saat merespons gift. Silakan coba lagi nanti.');
+      await message.reply('Terjadi kesalahan saat merespons perintah !gift. Silakan coba lagi nanti.');
     }
     return;
   }
@@ -219,6 +262,8 @@ client.on('messageCreate', async message => {
       prompt = `Berikan jawaban berdasarkan pencarian untuk: ${searchQuery}`;
     } else if (content.startsWith('!chat')) {
       prompt = content.replace('!chat', '').trim();
+    } else if (isBotActive && !content.startsWith('!')) {
+      prompt = content;
     }
 
     const attachment = message.attachments.first();
@@ -227,7 +272,7 @@ client.on('messageCreate', async message => {
     if (attachment) {
       const mimeType = attachment.contentType;
       if (!SUPPORTED_MIME_TYPES[mimeType]) {
-        await message.reply('Format file tidak didukung. Format yang didukung: JPEG, PNG, PDF, MP4, MP3, WAV');
+        await message.reply('Format file tidak didukung. Format yang didukung: JPEG, PNG, GIF, PDF, MP4, MP3, WAV');
         return;
       }
 
@@ -242,29 +287,34 @@ client.on('messageCreate', async message => {
 
         const fileType = SUPPORTED_MIME_TYPES[mimeType];
         let enhancedPrompt = prompt;
-        if (fileType === 'image' && !prompt) enhancedPrompt = systemPrompt;
-        else if (fileType === 'video' && !prompt) enhancedPrompt = systemPrompt;
-        else if (fileType === 'audio' && !prompt) enhancedPrompt = systemPrompt;
-        else if (fileType === 'pdf' && !prompt) enhancedPrompt = systemPrompt;
+        if (!prompt || prompt === content) {
+          if (fileType === 'image') enhancedPrompt = "Deskripsikan gambar ini dalam bahasa Indonesia menggunakan format Markdown.";
+          else if (fileType === 'gif') enhancedPrompt = "Deskripsikan GIF ini dalam bahasa Indonesia menggunakan format Markdown."; // Prompt khusus untuk GIF
+          else if (fileType === 'video') enhancedPrompt = "Deskripsikan video ini dalam bahasa Indonesia menggunakan format Markdown.";
+          else if (fileType === 'audio') enhancedPrompt = "Deskripsikan audio ini dalam bahasa Indonesia menggunakan format Markdown.";
+          else if (fileType === 'pdf') enhancedPrompt = "Ringkas isi PDF ini dalam bahasa Indonesia menggunakan format Markdown.";
+        }
 
         await message.channel.sendTyping();
         const aiResponse = await generateResponse(channelId, enhancedPrompt, mediaData, searchQuery);
         const responseChunks = splitText(aiResponse);
-
         for (let i = 0; i < responseChunks.length; i++) {
           if (i > 0) await new Promise(resolve => setTimeout(resolve, 1000));
           await message.channel.send(responseChunks[i]);
         }
       } catch (error) {
         console.error('Error memproses lampiran:', error);
-        await message.reply('Terjadi kesalahan saat memproses file lampiran.');
+        if (mimeType === 'image/gif') {
+          await message.reply('Saya tidak bisa memproses GIF secara langsung. Silakan berikan deskripsi teks dari GIF tersebut agar saya bisa membantu Anda!');
+        } else {
+          await message.reply('Terjadi kesalahan saat memproses file lampiran.');
+        }
       }
     } else {
       try {
         await message.channel.sendTyping();
         const aiResponse = await generateResponse(channelId, prompt, null, searchQuery);
         const responseChunks = splitText(aiResponse);
-
         for (let i = 0; i < responseChunks.length; i++) {
           if (i > 0) await new Promise(resolve => setTimeout(resolve, 1000));
           await message.channel.send(responseChunks[i]);
