@@ -210,7 +210,6 @@ client.on('messageCreate', async message => {
     return;
   }
 
-  // Logika untuk perintah lain seperti !chat atau !cari
   if (isBotActive || content.startsWith('!chat') || content.startsWith('!cari')) {
     let prompt = content;
     let searchQuery = null;
