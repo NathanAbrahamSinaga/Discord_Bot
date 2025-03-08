@@ -47,6 +47,14 @@ const SUPPORTED_MIME_TYPES = {
   'audio/wav': 'audio'
 };
 
+const MEDIA_PROMPTS = {
+  'image': 'Analisis gambar yang dilampirkan dan berikan deskripsi atau analisis yang relevan.',
+  'gif': 'Analisis GIF yang dilampirkan dan berikan deskripsi atau analisis yang relevan.',
+  'pdf': 'Analisis dokumen PDF yang dilampirkan dan berikan ringkasan atau analisis yang relevan.',
+  'video': 'Analisis video yang dilampirkan dan berikan deskripsi atau analisis yang relevan.',
+  'audio': 'Analisis audio yang dilampirkan dan berikan transkripsi atau analisis yang relevan.'
+};
+
 async function googleSearch(query) {
   try {
     const url = `https://www.googleapis.com/customsearch/v1?key=${GOOGLE_API_KEY}&cx=${GOOGLE_CSE_ID}&q=${encodeURIComponent(query)}&num=3`;
@@ -312,8 +320,11 @@ client.on('messageCreate', async message => {
 
         const fileType = SUPPORTED_MIME_TYPES[mimeType];
         let enhancedPrompt = prompt;
+
         if (!prompt || prompt === content) {
-          enhancedPrompt = `Analisis ${fileType} yang dilampirkan dan berikan respon rapi.`;
+          enhancedPrompt = MEDIA_PROMPTS[fileType];
+        } else {
+          enhancedPrompt = `${prompt}\n\nAnalisis ${fileType} yang dilampirkan.`;
         }
 
         await message.channel.sendTyping();
