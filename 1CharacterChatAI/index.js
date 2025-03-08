@@ -6,7 +6,15 @@ const fetch = require('node-fetch');
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 let model;
 
-const systemPrompt = "Jawab dengan bahasa Indonesia dan gunakan format Markdown. Untuk setiap daftar, pastikan setiap item dimulai pada baris baru dengan tanda '-'. Jangan gabungkan beberapa item dalam satu baris. Contoh format yang benar:\n- Item pertama\n- Item kedua\n- Item ketiga\nJika ada subjudul atau poin utama, gunakan '**Judul**' diikuti daftar dengan '-'. Pastikan output rapi dan mudah dibaca di Discord.";
+const systemPrompt = `
+Jawab dengan bahasa Indonesia. Pastikan output rapi dan mudah dibaca di Discord menggunakan format Markdown:
+- Gunakan # untuk heading besar, ## untuk subheading.
+- Gunakan - untuk bullet point pada list.
+- Gunakan ** untuk teks tebal, * untuk italic.
+- Gunakan \`\`\` untuk blok kode (contoh: \`\`\`javascript).
+- Pisahkan paragraf dengan baris kosong.
+- Batasi pesan agar tidak melebihi 2000 karakter.
+`;
 
 function updateModel() {
   model = genAI.getGenerativeModel({
@@ -46,25 +54,25 @@ async function googleSearch(query) {
 
     if (!response.ok) {
       const errorText = await response.text();
-      return `Maaf, terjadi kesalahan saat mengakses API Google. Status: ${response.status}, Pesan: ${errorText}`;
+      return `**Error Pencarian**\nMaaf, terjadi kesalahan saat mengakses API Google.\n- Status: ${response.status}\n- Pesan: ${errorText}`;
     }
 
     const data = await response.json();
     if (!data.items || data.items.length === 0) {
-      return "Maaf, tidak ada hasil yang ditemukan untuk pencarian ini.";
+      return "**Hasil Pencarian**\nMaaf, tidak ada hasil yang ditemukan untuk pencarian ini.";
     }
 
-    let searchResults = "Berikut adalah hasil pencarian dari Google:\n\n";
+    let searchResults = "**Hasil Pencarian dari Google**\n\n";
     data.items.forEach((item, index) => {
       searchResults += `- **${index + 1}. ${item.title}**\n`;
-      searchResults += `- ${item.snippet}\n`;
-      searchResults += `- Sumber: ${item.link}\n\n`;
+      searchResults += `  ${item.snippet}\n`;
+      searchResults += `  Sumber: [Klik di sini](${item.link})\n\n`;
     });
 
     return searchResults;
   } catch (error) {
     console.error('Error di googleSearch:', error);
-    return "Terjadi kesalahan saat melakukan pencarian Google.";
+    return "**Error**\nTerjadi kesalahan saat melakukan pencarian Google.";
   }
 }
 
@@ -86,7 +94,7 @@ async function generateResponse(channelId, prompt, mediaData = null, searchQuery
 
     if (searchQuery) {
       const searchResults = await googleSearch(searchQuery);
-      finalPrompt = `${prompt}\n\nBerikut adalah informasi dari pencarian Google yang mungkin membantu:\n${searchResults}`;
+      finalPrompt = `${prompt}\n\n${searchResults}`;
     }
 
     if (mediaData) {
@@ -101,7 +109,11 @@ async function generateResponse(channelId, prompt, mediaData = null, searchQuery
       result = await chat.sendMessage(finalPrompt);
     }
 
-    const responseText = await result.response.text();
+    let responseText = await result.response.text();
+
+    if (!responseText.includes('#') && !responseText.includes('-') && !responseText.includes('```')) {
+      responseText = `\n\n${responseText.split('\n\n').map(paragraph => paragraph.trim()).join('\n\n')}`;
+    }
 
     const history = await chat.getHistory();
     if (history.length > MAX_HISTORY * 2) {
@@ -111,7 +123,7 @@ async function generateResponse(channelId, prompt, mediaData = null, searchQuery
     return responseText;
   } catch (error) {
     console.error('Error di generateResponse:', error);
-    throw error;
+    return "**Error**\nTerjadi kesalahan saat menghasilkan respons. Silakan coba lagi.";
   }
 }
 
@@ -119,30 +131,33 @@ function ensureListFormatting(text) {
   const lines = text.split('\n');
   const processedLines = [];
   let inList = false;
-  let lastSubheader = '';
+  let inCodeBlock = false;
 
   for (let line of lines) {
     line = line.trim();
-    if (line.startsWith('**') && line.endsWith('**')) {
-      if (processedLines.length > 0) processedLines.push('');
+
+    if (line.startsWith('```')) {
+      inCodeBlock = !inCodeBlock;
       processedLines.push(line);
-      lastSubheader = line;
+      continue;
+    }
+
+    if (inCodeBlock) {
+      processedLines.push(line);
+      continue;
+    }
+
+    if (line.startsWith('#')) {
+      processedLines.push(line);
       inList = false;
     } else if (line.startsWith('- ') || line.startsWith('* ')) {
       processedLines.push(line.startsWith('- ') ? line : `- ${line.slice(2)}`);
       inList = true;
+    } else if (/^\d+\.\s/.test(line)) {
+      processedLines.push(`- ${line.replace(/^\d+\.\s/, '')}`);
+      inList = true;
     } else if (line && inList) {
-      processedLines.push(`- ${line}`);
-    } else if (line.includes(' - ') || line.includes(' * ')) {
-      const separator = line.includes(' - ') ? ' - ' : ' * ';
-      const items = line.split(separator).map(item => item.trim()).filter(item => item);
-      items.forEach((item, index) => {
-        processedLines.push(`${index === 0 && !item.startsWith('-') ? '' : '-' } ${item}`);
-      });
-      inList = true;
-    } else if (line && !inList && lastSubheader) {
-      processedLines.push(`- ${line}`);
-      inList = true;
+      processedLines.push(`  ${line}`);
     } else {
       processedLines.push(line);
       inList = false;
@@ -152,21 +167,31 @@ function ensureListFormatting(text) {
   return processedLines.join('\n');
 }
 
-function splitText(text, maxLength = 2000) {
+function splitText(text, maxLength = 1900) {
   const chunks = [];
   let currentChunk = '';
   const lines = text.split('\n');
-  let lastSubheader = '';
+  let inCodeBlock = false;
 
   for (const line of lines) {
-    if (line.startsWith('**') && line.endsWith('**')) {
-      lastSubheader = line;
+    if (line.trim().startsWith('```')) {
+      inCodeBlock = !inCodeBlock;
+      if (currentChunk.length + line.length + 1 > maxLength && currentChunk) {
+        chunks.push(currentChunk.trim());
+        currentChunk = line;
+      } else {
+        currentChunk += (currentChunk ? '\n' : '') + line;
+      }
+      continue;
     }
 
     if (currentChunk.length + line.length + 1 > maxLength) {
-      if (currentChunk) {
+      if (inCodeBlock) {
+        chunks.push(currentChunk.trim() + '\n```');
+        currentChunk = '```\n' + line;
+      } else if (currentChunk) {
         chunks.push(currentChunk.trim());
-        currentChunk = lastSubheader ? `${lastSubheader}\n\n${line}` : line;
+        currentChunk = line;
       } else {
         const words = line.split(' ');
         for (const word of words) {
@@ -184,6 +209,9 @@ function splitText(text, maxLength = 2000) {
   }
 
   if (currentChunk) {
+    if (inCodeBlock && !currentChunk.endsWith('```')) {
+      currentChunk += '\n```';
+    }
     chunks.push(currentChunk.trim());
   }
 
@@ -213,7 +241,7 @@ client.on('interactionCreate', async interaction => {
   if (now < cooldownEndTime) {
     const remainingTime = (cooldownEndTime - now) / 1000;
     return interaction.reply({
-      content: `Silakan tunggu ${remainingTime.toFixed(1)} detik sebelum menggunakan perintah ini lagi.`,
+      content: `**Cooldown**\nSilakan tunggu ${remainingTime.toFixed(1)} detik sebelum menggunakan perintah ini lagi.`,
       ephemeral: true
     });
   }
@@ -222,10 +250,10 @@ client.on('interactionCreate', async interaction => {
 
   if (commandName === 'activate') {
     channelActivity.set(channelId, true);
-    await interaction.reply('Bot diaktifkan di channel ini!');
+    await interaction.reply('**Status**\nBot diaktifkan di channel ini!');
   } else if (commandName === 'deactivate') {
     channelActivity.set(channelId, false);
-    await interaction.reply('Bot dinonaktifkan di channel ini!');
+    await interaction.reply('**Status**\nBot dinonaktifkan di channel ini!');
   }
 });
 
@@ -238,17 +266,17 @@ client.on('messageCreate', async message => {
 
   if (content.toLowerCase().startsWith('!gift')) {
     await message.channel.sendTyping();
-    const giftPrompt = "Berikan daftar saran hadiah menarik dalam bahasa Indonesia menggunakan format Markdown.";
+    const giftPrompt = "Berikan contoh output rapi untuk Discord.";
     try {
       const aiResponse = await generateResponse(channelId, giftPrompt);
       const responseChunks = splitText(aiResponse);
-      for (let i = 0; i < responseChunks.length; i++) {
-        if (i > 0) await new Promise(resolve => setTimeout(resolve, 1000));
-        await message.channel.send(responseChunks[i]);
+      for (const chunk of responseChunks) {
+        await message.channel.send(chunk);
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
     } catch (error) {
       console.error('Error saat merespons gift:', error);
-      await message.reply('Terjadi kesalahan saat merespons perintah !gift. Silakan coba lagi nanti.');
+      await message.reply('**Error**\nTerjadi kesalahan saat merespons perintah !gift.');
     }
     return;
   }
@@ -272,7 +300,7 @@ client.on('messageCreate', async message => {
     if (attachment) {
       const mimeType = attachment.contentType;
       if (!SUPPORTED_MIME_TYPES[mimeType]) {
-        await message.reply('Format file tidak didukung. Format yang didukung: JPEG, PNG, GIF, PDF, MP4, MP3, WAV');
+        await message.reply('\nFormat file tidak didukung. Format yang didukung:\n- JPEG\n- PNG\n- GIF\n- PDF\n- MP4\n- MP3\n- WAV');
         return;
       }
 
@@ -280,48 +308,37 @@ client.on('messageCreate', async message => {
         const fetchResponse = await fetch(attachment.url);
         const buffer = await fetchResponse.arrayBuffer();
         const base64 = Buffer.from(buffer).toString('base64');
-        mediaData = {
-          mimeType: mimeType,
-          base64: base64
-        };
+        mediaData = { mimeType, base64 };
 
         const fileType = SUPPORTED_MIME_TYPES[mimeType];
         let enhancedPrompt = prompt;
         if (!prompt || prompt === content) {
-          if (fileType === 'image') enhancedPrompt = "Deskripsikan gambar ini dalam bahasa Indonesia menggunakan format Markdown.";
-          else if (fileType === 'gif') enhancedPrompt = "Deskripsikan GIF ini dalam bahasa Indonesia menggunakan format Markdown."; // Prompt khusus untuk GIF
-          else if (fileType === 'video') enhancedPrompt = "Deskripsikan video ini dalam bahasa Indonesia menggunakan format Markdown.";
-          else if (fileType === 'audio') enhancedPrompt = "Deskripsikan audio ini dalam bahasa Indonesia menggunakan format Markdown.";
-          else if (fileType === 'pdf') enhancedPrompt = "Ringkas isi PDF ini dalam bahasa Indonesia menggunakan format Markdown.";
+          enhancedPrompt = `Analisis ${fileType} yang dilampirkan dan berikan respon rapi.`;
         }
 
         await message.channel.sendTyping();
         const aiResponse = await generateResponse(channelId, enhancedPrompt, mediaData, searchQuery);
         const responseChunks = splitText(aiResponse);
-        for (let i = 0; i < responseChunks.length; i++) {
-          if (i > 0) await new Promise(resolve => setTimeout(resolve, 1000));
-          await message.channel.send(responseChunks[i]);
+        for (const chunk of responseChunks) {
+          await message.channel.send(chunk);
+          await new Promise(resolve => setTimeout(resolve, 1000));
         }
       } catch (error) {
         console.error('Error memproses lampiran:', error);
-        if (mimeType === 'image/gif') {
-          await message.reply('Saya tidak bisa memproses GIF secara langsung. Silakan berikan deskripsi teks dari GIF tersebut agar saya bisa membantu Anda!');
-        } else {
-          await message.reply('Terjadi kesalahan saat memproses file lampiran.');
-        }
+        await message.reply('**Error**\nTerjadi kesalahan saat memproses file lampiran.');
       }
     } else {
       try {
         await message.channel.sendTyping();
         const aiResponse = await generateResponse(channelId, prompt, null, searchQuery);
         const responseChunks = splitText(aiResponse);
-        for (let i = 0; i < responseChunks.length; i++) {
-          if (i > 0) await new Promise(resolve => setTimeout(resolve, 1000));
-          await message.channel.send(responseChunks[i]);
+        for (const chunk of responseChunks) {
+          await message.channel.send(chunk);
+          await new Promise(resolve => setTimeout(resolve, 1000));
         }
       } catch (error) {
         console.error('Error di messageCreate:', error);
-        await message.reply('Terjadi kesalahan, silakan coba lagi nanti.');
+        await message.reply('**Error**\nTerjadi kesalahan, silakan coba lagi nanti.');
       }
     }
   }
