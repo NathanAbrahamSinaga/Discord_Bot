@@ -36,10 +36,10 @@ const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
 const GOOGLE_CSE_ID = process.env.GOOGLE_CSE_ID;
 
 const SUPPORTED_MIME_TYPES = {
-  'image/jpeg': 'image',
-  'image/png': 'image',
-  'image/gif': 'gif',
-  'application/pdf': 'pdf',
+  'image/jpeg': 'gambar',
+  'image/png': 'gambar',
+  'image/gif': 'GIF',
+  'application/pdf': 'PDF',
   'video/mp4': 'video',
   'video/mpeg': 'video',
   'audio/mp3': 'audio',
@@ -48,11 +48,11 @@ const SUPPORTED_MIME_TYPES = {
 };
 
 const MEDIA_PROMPTS = {
-  'image': 'Analisis gambar yang dilampirkan dan berikan deskripsi atau analisis yang relevan.',
-  'gif': 'Analisis GIF yang dilampirkan dan berikan deskripsi atau analisis yang relevan.',
-  'pdf': 'Analisis dokumen PDF yang dilampirkan dan berikan ringkasan atau analisis yang relevan.',
-  'video': 'Analisis video yang dilampirkan dan berikan deskripsi atau analisis yang relevan.',
-  'audio': 'Analisis audio yang dilampirkan dan berikan transkripsi atau analisis yang relevan.'
+  'gambar': 'tanggapi gambarnya',
+  'GIF': 'tanggapi GIF-nya',
+  'PDF': 'Berikan analisis PDF-nya.',
+  'video': 'tanggapi video-nya',
+  'audio': 'tanggapi audio-nya'
 };
 
 async function googleSearch(query) {
@@ -274,7 +274,7 @@ client.on('messageCreate', async message => {
 
   if (content.toLowerCase().startsWith('!gift')) {
     await message.channel.sendTyping();
-    const giftPrompt = "Berikan contoh output rapi untuk Discord.";
+    const giftPrompt = "Berikan analisis GIF di bawah ini.";
     try {
       const aiResponse = await generateResponse(channelId, giftPrompt);
       const responseChunks = splitText(aiResponse);
@@ -304,10 +304,12 @@ client.on('messageCreate', async message => {
 
     const attachment = message.attachments.first();
     let mediaData = null;
+    let mediaType = null;
 
     if (attachment) {
       const mimeType = attachment.contentType;
-      if (!SUPPORTED_MIME_TYPES[mimeType]) {
+      mediaType = SUPPORTED_MIME_TYPES[mimeType];
+      if (!mediaType) {
         await message.reply('\nFormat file tidak didukung. Format yang didukung:\n- JPEG\n- PNG\n- GIF\n- PDF\n- MP4\n- MP3\n- WAV');
         return;
       }
@@ -318,13 +320,11 @@ client.on('messageCreate', async message => {
         const base64 = Buffer.from(buffer).toString('base64');
         mediaData = { mimeType, base64 };
 
-        const fileType = SUPPORTED_MIME_TYPES[mimeType];
         let enhancedPrompt = prompt;
-
         if (!prompt || prompt === content) {
-          enhancedPrompt = MEDIA_PROMPTS[fileType];
+          enhancedPrompt = MEDIA_PROMPTS[mediaType];
         } else {
-          enhancedPrompt = `${prompt}\n\nAnalisis ${fileType} yang dilampirkan.`;
+          enhancedPrompt = `${prompt}\n\n${MEDIA_PROMPTS[mediaType]}`;
         }
 
         await message.channel.sendTyping();
