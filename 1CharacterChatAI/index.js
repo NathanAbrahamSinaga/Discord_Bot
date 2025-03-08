@@ -18,7 +18,7 @@ Jawab dengan bahasa Indonesia. Pastikan output rapi dan mudah dibaca di Discord 
 
 function updateModel() {
   model = genAI.getGenerativeModel({
-    model: 'gemini-1.5-flash',
+    model: 'gemini-2.0-flash',
     systemInstruction: {
       role: 'model',
       parts: [{ text: systemPrompt }]
