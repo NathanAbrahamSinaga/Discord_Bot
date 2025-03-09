@@ -2,9 +2,11 @@ require('dotenv').config();
 const { Client, GatewayIntentBits } = require('discord.js');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const fetch = require('node-fetch');
+const cheerio = require('cheerio');
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-let model;
+let defaultModel;
+let thinkingModel;
 
 const systemPrompt = `
 Jawab dengan bahasa Indonesia. Pastikan output rapi dan mudah dibaca di Discord menggunakan format Markdown:
@@ -16,16 +18,24 @@ Jawab dengan bahasa Indonesia. Pastikan output rapi dan mudah dibaca di Discord 
 - Batasi pesan agar tidak melebihi 2000 karakter.
 `;
 
-function updateModel() {
-  model = genAI.getGenerativeModel({
+function updateModels() {
+  defaultModel = genAI.getGenerativeModel({
     model: 'gemini-2.0-flash',
     systemInstruction: {
       role: 'model',
       parts: [{ text: systemPrompt }]
     }
   });
+
+  thinkingModel = genAI.getGenerativeModel({
+    model: 'gemini-2.0-flash-thinking-exp',
+    systemInstruction: {
+      role: 'model',
+      parts: [{ text: systemPrompt }]
+    }
+  });
 }
-updateModel();
+updateModels();
 
 const conversationHistory = new Map();
 const commandCooldowns = new Map();
@@ -47,17 +57,32 @@ const SUPPORTED_MIME_TYPES = {
   'audio/wav': 'audio'
 };
 
-const defaultPrompts = {
-  'image': 'Analisis gambar yang dilampirkan.',
-  'gif': 'Analisis GIF yang dilampirkan.',
-  'pdf': 'Ringkas isi dokumen PDF yang dilampirkan.',
-  'video': 'Analisis video yang dilampirkan.',
-  'audio': 'Analisis audio yang dilampirkan.'
-};
+async function fetchWebContent(url) {
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; DiscordBot/1.0)'
+      }
+    });
+    if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+    const html = await response.text();
+    const $ = cheerio.load(html);
+
+    let content = '';
+    $('p, h1, h2, h3').each((i, elem) => {
+      content += $(elem).text().trim() + '\n';
+    });
+
+    return content.slice(0, 5000);
+  } catch (error) {
+    console.error('Error di fetchWebContent:', error);
+    return `**Error Scraping**\nGagal mengambil konten dari ${url}.`;
+  }
+}
 
 async function googleSearch(query) {
   try {
-    const url = `https://www.googleapis.com/customsearch/v1?key=${GOOGLE_API_KEY}&cx=${GOOGLE_CSE_ID}&q=${encodeURIComponent(query)}&num=3`;
+    const url = `https://www.googleapis.com/customsearch/v1?key=${GOOGLE_API_KEY}&cx=${GOOGLE_CSE_ID}&q=${encodeURIComponent(query)}&num=5&lr=lang_id&gl=id`;
     const response = await fetch(url);
 
     if (!response.ok) {
@@ -70,6 +95,9 @@ async function googleSearch(query) {
       return "**Hasil Pencarian**\nMaaf, tidak ada hasil yang ditemukan untuk pencarian ini.";
     }
 
+    const firstUrl = data.items[0].link;
+    const webContent = await fetchWebContent(firstUrl);
+
     let searchResults = "**Hasil Pencarian dari Google**\n\n";
     data.items.forEach((item, index) => {
       searchResults += `- **${index + 1}. ${item.title}**\n`;
@@ -77,6 +105,7 @@ async function googleSearch(query) {
       searchResults += `  Sumber: [Klik di sini](${item.link})\n\n`;
     });
 
+    searchResults += `**Konten dari ${firstUrl}**\n${webContent}\n`;
     return searchResults;
   } catch (error) {
     console.error('Error di googleSearch:', error);
@@ -84,10 +113,12 @@ async function googleSearch(query) {
   }
 }
 
-async function generateResponse(channelId, prompt, mediaData = null, searchQuery = null) {
+async function generateResponse(channelId, prompt, mediaData = null, searchQuery = null, useThinking = false) {
   try {
+    const selectedModel = useThinking ? thinkingModel : defaultModel;
+
     if (!conversationHistory.has(channelId)) {
-      conversationHistory.set(channelId, model.startChat({
+      conversationHistory.set(channelId, selectedModel.startChat({
         history: [],
         generationConfig: {
           temperature: 0.9,
@@ -106,13 +137,11 @@ async function generateResponse(channelId, prompt, mediaData = null, searchQuery
     }
 
     if (mediaData) {
-      const mediaParts = [{
-        inlineData: {
-          mimeType: mediaData.mimeType,
-          data: mediaData.base64
-        }
-      }];
-      result = await chat.sendMessage([finalPrompt, ...mediaParts]);
+      const textPart = prompt ? { text: prompt } : null;
+      const mediaPart = { inlineData: { mimeType: mediaData.mimeType, data: mediaData.base64 } };
+      const parts = [mediaPart];
+      if (textPart) parts.unshift(textPart);
+      result = await chat.sendMessage(parts);
     } else {
       result = await chat.sendMessage(finalPrompt);
     }
@@ -272,11 +301,39 @@ client.on('messageCreate', async message => {
   const isBotActive = channelActivity.get(channelId) || false;
   const content = message.content.trim();
 
+  // Bagian Ditambahkan: Fitur !reset
+  if (content.toLowerCase() === '!reset') {
+    if (conversationHistory.has(channelId)) {
+      conversationHistory.delete(channelId); // Menghapus riwayat percakapan untuk channel ini
+      await message.channel.send('Riwayat percakapan di channel ini telah direset!');
+    } else {
+      await message.channel.send('Tidak ada riwayat percakapan yang perlu dihapus');
+    }
+    return;
+  }
+
+  if (content.toLowerCase().startsWith('!think')) {
+    await message.channel.sendTyping();
+    const thinkingPrompt = content.replace('!think', '').trim();
+    try {
+      const aiResponse = await generateResponse(channelId, thinkingPrompt, null, null, true); 
+      const responseChunks = splitText(aiResponse);
+      for (const chunk of responseChunks) {
+        await message.channel.send(chunk);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    } catch (error) {
+      console.error('Error saat merespons thinking:', error);
+      await message.reply('**Error**\nTerjadi kesalahan saat merespons perintah !think.');
+    }
+    return;
+  }
+
   if (content.toLowerCase().startsWith('!gift')) {
     await message.channel.sendTyping();
     const giftPrompt = content.replace('!gift', '').trim();
     try {
-      const aiResponse = await generateResponse(channelId, giftPrompt);
+      const aiResponse = await generateResponse(channelId, giftPrompt); 
       const responseChunks = splitText(aiResponse);
       for (const chunk of responseChunks) {
         await message.channel.send(chunk);
@@ -318,14 +375,8 @@ client.on('messageCreate', async message => {
         const base64 = Buffer.from(buffer).toString('base64');
         mediaData = { mimeType, base64 };
 
-        const fileType = SUPPORTED_MIME_TYPES[mimeType];
-        let enhancedPrompt = prompt;
-        if (!prompt) {
-          enhancedPrompt = defaultPrompts[fileType] || 'Analisis file yang dilampirkan.';
-        }
-
         await message.channel.sendTyping();
-        const aiResponse = await generateResponse(channelId, enhancedPrompt, mediaData, searchQuery);
+        const aiResponse = await generateResponse(channelId, prompt, mediaData, searchQuery);
         const responseChunks = splitText(aiResponse);
         for (const chunk of responseChunks) {
           await message.channel.send(chunk);
@@ -338,7 +389,7 @@ client.on('messageCreate', async message => {
     } else {
       try {
         await message.channel.sendTyping();
-        const aiResponse = await generateResponse(channelId, prompt, null, searchQuery);
+        const aiResponse = await generateResponse(channelId, prompt, null, searchQuery); 
         const responseChunks = splitText(aiResponse);
         for (const chunk of responseChunks) {
           await message.channel.send(chunk);
