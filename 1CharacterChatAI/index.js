@@ -99,7 +99,7 @@ async function googleSearch(query) {
     const webContent = await fetchWebContent(firstUrl);
 
     let searchResults = "**Hasil Pencarian dari Google**\n\n";
-    data.items.forEach((item, index) => {
+    data.items.forEach((index, item) => {
       searchResults += `- **${index + 1}. ${item.title}**\n`;
       searchResults += `  ${item.snippet}\n`;
       searchResults += `  Sumber: [Klik di sini](${item.link})\n\n`;
@@ -164,6 +164,42 @@ async function generateResponse(channelId, prompt, mediaData = null, searchQuery
   }
 }
 
+function getCodeLanguage(line) {
+  const match = line.match(/^```(\w+)?/);
+  return match ? match[1] || '' : '';
+}
+
+function formatCodeBlock(text, language = '') {
+  const lines = text.split('\n');
+  const formattedLines = [];
+  let inCodeBlock = false;
+  let currentLanguage = language;
+
+  for (let line of lines) {
+    const trimmedLine = line.trim();
+
+    if (trimmedLine.startsWith('```')) {
+      if (!inCodeBlock) {
+        currentLanguage = getCodeLanguage(trimmedLine) || currentLanguage;
+        formattedLines.push(`\`\`\`${currentLanguage}`);
+        inCodeBlock = true;
+      } else {
+        formattedLines.push('```');
+        inCodeBlock = false;
+      }
+      continue;
+    }
+
+    if (inCodeBlock && trimmedLine) {
+      formattedLines.push(`  ${line}`);
+    } else {
+      formattedLines.push(line);
+    }
+  }
+
+  return formattedLines.join('\n');
+}
+
 function ensureListFormatting(text) {
   const lines = text.split('\n');
   const processedLines = [];
@@ -171,9 +207,9 @@ function ensureListFormatting(text) {
   let inCodeBlock = false;
 
   for (let line of lines) {
-    line = line.trim();
+    const trimmedLine = line.trim();
 
-    if (line.startsWith('```')) {
+    if (trimmedLine.startsWith('```')) {
       inCodeBlock = !inCodeBlock;
       processedLines.push(line);
       continue;
@@ -184,17 +220,17 @@ function ensureListFormatting(text) {
       continue;
     }
 
-    if (line.startsWith('#')) {
+    if (trimmedLine.startsWith('#')) {
       processedLines.push(line);
       inList = false;
-    } else if (line.startsWith('- ') || line.startsWith('* ')) {
-      processedLines.push(line.startsWith('- ') ? line : `- ${line.slice(2)}`);
+    } else if (trimmedLine.startsWith('- ') || trimmedLine.startsWith('* ')) {
+      processedLines.push(trimmedLine.startsWith('- ') ? line : `- ${trimmedLine.slice(2)}`);
       inList = true;
-    } else if (/^\d+\.\s/.test(line)) {
-      processedLines.push(`- ${line.replace(/^\d+\.\s/, '')}`);
+    } else if (/^\d+\.\s/.test(trimmedLine)) {
+      processedLines.push(`- ${trimmedLine.replace(/^\d+\.\s/, '')}`);
       inList = true;
-    } else if (line && inList) {
-      processedLines.push(`  ${line}`);
+    } else if (trimmedLine && inList) {
+      processedLines.push(`  ${trimmedLine}`);
     } else {
       processedLines.push(line);
       inList = false;
@@ -209,39 +245,58 @@ function splitText(text, maxLength = 1900) {
   let currentChunk = '';
   const lines = text.split('\n');
   let inCodeBlock = false;
+  let currentLanguage = '';
 
   for (const line of lines) {
-    if (line.trim().startsWith('```')) {
-      inCodeBlock = !inCodeBlock;
-      if (currentChunk.length + line.length + 1 > maxLength && currentChunk) {
+    const trimmedLine = line.trim();
+
+    if (trimmedLine.startsWith('```')) {
+      if (!inCodeBlock) {
+        currentLanguage = trimmedLine.replace('```', '');
+        inCodeBlock = true;
+      } else {
+        inCodeBlock = false;
+      }
+      currentChunk += (currentChunk ? '\n' : '') + line;
+      continue;
+    }
+
+    if (inCodeBlock) {
+      if (line.length > maxLength) {
+        const parts = line.match(new RegExp(`.{1,${maxLength}}`, 'g'));
+        for (const part of parts) {
+          if (currentChunk.length + part.length + 1 > maxLength) {
+            currentChunk += '\n```';
+            chunks.push(currentChunk.trim());
+            currentChunk = `\`\`\`${currentLanguage}\n${part}`;
+          } else {
+            currentChunk += (currentChunk ? '\n' : '') + part;
+          }
+        }
+      } else if (currentChunk.length + line.length + 1 > maxLength) {
+        currentChunk += '\n```';
+        chunks.push(currentChunk.trim());
+        currentChunk = `\`\`\`${currentLanguage}\n${line}`;
+      } else {
+        currentChunk += (currentChunk ? '\n' : '') + line;
+      }
+    } else {
+      if (line.length > maxLength) {
+        const parts = line.match(new RegExp(`.{1,${maxLength}}`, 'g'));
+        for (const part of parts) {
+          if (currentChunk.length + part.length + 1 > maxLength) {
+            chunks.push(currentChunk.trim());
+            currentChunk = part;
+          } else {
+            currentChunk += (currentChunk ? '\n' : '') + part;
+          }
+        }
+      } else if (currentChunk.length + line.length + 1 > maxLength) {
         chunks.push(currentChunk.trim());
         currentChunk = line;
       } else {
         currentChunk += (currentChunk ? '\n' : '') + line;
       }
-      continue;
-    }
-
-    if (currentChunk.length + line.length + 1 > maxLength) {
-      if (inCodeBlock) {
-        chunks.push(currentChunk.trim() + '\n```');
-        currentChunk = '```\n' + line;
-      } else if (currentChunk) {
-        chunks.push(currentChunk.trim());
-        currentChunk = line;
-      } else {
-        const words = line.split(' ');
-        for (const word of words) {
-          if (currentChunk.length + word.length + 1 > maxLength) {
-            chunks.push(currentChunk.trim());
-            currentChunk = word;
-          } else {
-            currentChunk += (currentChunk ? ' ' : '') + word;
-          }
-        }
-      }
-    } else {
-      currentChunk += (currentChunk ? '\n' : '') + line;
     }
   }
 
@@ -252,7 +307,7 @@ function splitText(text, maxLength = 1900) {
     chunks.push(currentChunk.trim());
   }
 
-  return chunks.map(chunk => ensureListFormatting(chunk));
+  return chunks;
 }
 
 const client = new Client({
@@ -315,7 +370,7 @@ client.on('messageCreate', async message => {
     await message.channel.sendTyping();
     const thinkingPrompt = content.replace('!think', '').trim();
     try {
-      const aiResponse = await generateResponse(channelId, thinkingPrompt, null, null, true); 
+      const aiResponse = await generateResponse(channelId, thinkingPrompt, null, null, true);
       const responseChunks = splitText(aiResponse);
       for (const chunk of responseChunks) {
         await message.channel.send(chunk);
@@ -332,7 +387,7 @@ client.on('messageCreate', async message => {
     await message.channel.sendTyping();
     const giftPrompt = content.replace('!gift', '').trim();
     try {
-      const aiResponse = await generateResponse(channelId, giftPrompt); 
+      const aiResponse = await generateResponse(channelId, giftPrompt);
       const responseChunks = splitText(aiResponse);
       for (const chunk of responseChunks) {
         await message.channel.send(chunk);
@@ -388,7 +443,7 @@ client.on('messageCreate', async message => {
     } else {
       try {
         await message.channel.sendTyping();
-        const aiResponse = await generateResponse(channelId, prompt, null, searchQuery); 
+        const aiResponse = await generateResponse(channelId, prompt, null, searchQuery);
         const responseChunks = splitText(aiResponse);
         for (const chunk of responseChunks) {
           await message.channel.send(chunk);
