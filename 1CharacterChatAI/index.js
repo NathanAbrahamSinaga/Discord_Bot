@@ -301,10 +301,9 @@ client.on('messageCreate', async message => {
   const isBotActive = channelActivity.get(channelId) || false;
   const content = message.content.trim();
 
-  // Bagian Ditambahkan: Fitur !reset
   if (content.toLowerCase() === '!reset') {
     if (conversationHistory.has(channelId)) {
-      conversationHistory.delete(channelId); // Menghapus riwayat percakapan untuk channel ini
+      conversationHistory.delete(channelId);
       await message.channel.send('Riwayat percakapan di channel ini telah direset!');
     } else {
       await message.channel.send('Tidak ada riwayat percakapan yang perlu dihapus');
