@@ -118,7 +118,13 @@ async def google_search(query):
         print(f'Error di googleSearch: {error}')
         return "**Error**\nTerjadi kesalahan saat melakukan pencarian Google."
 
-async def generate_response(channel_id, prompt, media_data=None, search_query=None, use_thinking=False):
+def extract_youtube_url(text):
+    import re
+    youtube_pattern = r'(https?://(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/)[^\s]+)'
+    match = re.search(youtube_pattern, text)
+    return match.group(0) if match else None
+
+async def generate_response(channel_id, prompt, media_data=None, search_query=None, use_thinking=False, youtube_url=None):
     try:
         model_name = "gemini-2.0-flash-thinking-exp" if use_thinking else "gemini-2.0-flash"
         
@@ -149,6 +155,11 @@ async def generate_response(channel_id, prompt, media_data=None, search_query=No
                     data=base64.b64decode(media_data['base64']),
                     mime_type=media_data['mime_type']
                 ))
+
+        if youtube_url:
+            contents.append(types.Part(
+                file_data=types.FileData(file_uri=youtube_url)
+            ))
 
         loop = asyncio.get_event_loop()
         response = await loop.run_in_executor(
@@ -545,6 +556,7 @@ async def on_message(message):
     if is_bot_active or content.startswith('!chat') or content.startswith('!cari'):
         prompt = content
         search_query = None
+        youtube_url = extract_youtube_url(content)
 
         if content.startswith('!cari'):
             search_query = content.replace('!cari', '', 1).strip()
@@ -570,14 +582,14 @@ async def on_message(message):
                 base64_data = base64.b64encode(buffer).decode('utf-8')
                 media_data = {'mime_type': mime_type, 'base64': base64_data}
 
-                ai_response = await generate_response(channel_id, prompt, media_data, search_query)
+                ai_response = await generate_response(channel_id, prompt, media_data, search_query, youtube_url=youtube_url)
                 response_chunks = split_text(ai_response)
                 for chunk in response_chunks:
                     await message.channel.send(chunk)
                     await asyncio.sleep(1)
         else:
             async with message.channel.typing():
-                ai_response = await generate_response(channel_id, prompt, None, search_query)
+                ai_response = await generate_response(channel_id, prompt, None, search_query, youtube_url=youtube_url)
                 response_chunks = split_text(ai_response)
                 for chunk in response_chunks:
                     await message.channel.send(chunk)
