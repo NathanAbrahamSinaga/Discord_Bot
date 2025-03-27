@@ -177,13 +177,39 @@ async def generate_response(channel_id, prompt, media_data=None, search_query=No
         print(f'Error di generateResponse: {error}')
         return "**Error**\nTerjadi kesalahan saat menghasilkan respons. Silakan coba lagi."
 
+async def enrich_prompt(prompt, use_english=False):
+    try:
+        model_name = "gemini-2.0-flash"
+        language_instruction = "Jawab dengan bahasa Indonesia." if not use_english else "Answer in English."
+        enrichment_prompt = f"{language_instruction} Bagusin promptnya tanpa mengubah intinya, agar generate gambar bisa lebih bagus (mohon langsung jawabannya saja formatnya): {prompt}"
+        
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: client.models.generate_content(
+                model=model_name,
+                contents=enrichment_prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.9,
+                    max_output_tokens=200
+                )
+            )
+        )
+        
+        enriched_prompt = response.candidates[0].content.parts[0].text
+        return enriched_prompt.strip()
+    except Exception as error:
+        print(f'Error di enrichPrompt: {error}')
+        return prompt
+
 async def generate_image(channel_id, prompt, use_english=False):
     try:
+        enriched_prompt = await enrich_prompt(prompt, use_english)
+        print(f"Enriched Prompt: {enriched_prompt}")
+        
         model_name = "gemini-2.0-flash-exp"
         
-        image_prompt = prompt
-        if use_english:
-            image_prompt = prompt
+        image_prompt = enriched_prompt
         
         loop = asyncio.get_event_loop()
         response = await loop.run_in_executor(
@@ -224,7 +250,7 @@ async def generate_image(channel_id, prompt, use_english=False):
         
     except Exception as error:
         print(f'Error di generateImage: {error}')
-        error_text = f"**Error**\nTerjadi kesalahan saat menghasilkan gambar: {str(error)}"
+        error_text = f"**Error**\nTerjadi kesalahan saat menghasilkan gambar: {str(error)} opções"
         if use_english:
             error_text = f"**Error**\nAn error occurred while generating the image: {str(error)}"
         return None, error_text
@@ -424,7 +450,7 @@ async def on_message(message):
             
             if img_buffer:
                 await message.channel.send(
-                    f"**{response_text}**\nBerdasarkan prompt: {image_prompt}", 
+                    f"**{response_text}**\n", 
                     file=File(fp=img_buffer, filename='generated_image.png')
                 )
             else:
@@ -477,7 +503,7 @@ async def on_message(message):
             
             if edited_img_buffer:
                 await message.channel.send(
-                    f"**{edit_response_text}**\nBerdasarkan prompt: {edit_prompt}", 
+                    f"**{edit_response_text}**\n", 
                     file=File(fp=edited_img_buffer, filename='edited_image.png')
                 )
             else:
